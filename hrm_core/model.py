@@ -6,12 +6,12 @@ from .inner import HRMCoreInner
 
 
 class HRMForQA(nn.Module):
-    """Minimal HRM-based extractive reader for multi-hop QA."""
+    """HRM‑based extractive reader with gated fusion + soft‑halting."""
     def __init__(self, cfg: HRMCoreConfig):
         super().__init__()
         self.cfg = cfg
 
-        # Embeddings (can be swapped for external encoder outputs)
+        # Embeddings (có thể thay bằng external encoder outputs)
         self.token_emb = nn.Embedding(cfg.vocab_size, cfg.hidden_size)
         self.pos_emb = nn.Embedding(cfg.max_position_embeddings, cfg.hidden_size)
         self.ln_in = nn.LayerNorm(cfg.hidden_size)
@@ -29,36 +29,37 @@ class HRMForQA(nn.Module):
 
     def forward(
         self,
-        input_ids: torch.Tensor = None,
+        input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,  # 1=keep, 0=pad
         start_positions: Optional[torch.Tensor] = None,
         end_positions: Optional[torch.Tensor] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
-        B, S = (inputs_embeds.size(0), inputs_embeds.size(1)) if inputs_embeds is not None else input_ids.shape
-        device = (inputs_embeds.device if inputs_embeds is not None else input_ids.device)
         if inputs_embeds is not None:
-            # đã có pos từ encoder → KHÔNG cộng pos_emb lần nữa
+            B, S = inputs_embeds.size(0), inputs_embeds.size(1)
+            device = inputs_embeds.device
             x = self.ln_in(inputs_embeds)
         else:
+            assert input_ids is not None
+            B, S = input_ids.size(0), input_ids.size(1)
+            device = input_ids.device
             pos = torch.arange(S, device=device).unsqueeze(0).expand(B, S)
             x = self.token_emb(input_ids) + self.pos_emb(pos)
             x = self.ln_in(x)
-        
 
         # Init states
         z_H, z_L = self.init_states(B, S, device)
 
-        # Convert HF-style attention_mask -> key_padding_mask (True means masked)
+        # Convert HF‑style attention_mask -> key_padding_mask (True means masked)
         key_padding_mask = None
         if attention_mask is not None:
             key_padding_mask = (attention_mask == 0)
 
-        # Fixed-step hierarchical reasoning
-        z_H, z_L = self.inner(z_H, z_L, token_embeddings=x, key_padding_mask=key_padding_mask)
+        # Hierarchical reasoning với soft‑halting
+        z_H_out, z_L_last = self.inner(z_H, z_L, token_embeddings=x, key_padding_mask=key_padding_mask)
 
-        # Span head on H-level states
-        logits = self.qa_head(z_H)  # [B, S, 2]
+        # Span head trên H_out
+        logits = self.qa_head(z_H_out)  # [B, S, 2]
         start_logits, end_logits = logits[..., 0], logits[..., 1]
 
         out = {"start_logits": start_logits, "end_logits": end_logits}
