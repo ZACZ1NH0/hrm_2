@@ -91,34 +91,80 @@ def best_span(start_logits, end_logits, attn_mask, max_answer_len=30):
         best_s[b] = bs; best_e[b] = be
     return best_s, best_e
 
-def best_span_and_score(start_logits, end_logits, attn_mask, context_mask, max_answer_len=30):
+# def best_span_and_score(start_logits, end_logits, attn_mask, context_mask, max_answer_len=30):
+#     # valid = vừa không pad, vừa là token thuộc context
+#     valid = (attn_mask == 1) & (context_mask == 1)
+#     start_scores = start_logits.masked_fill(~valid, -1e9)
+#     end_scores   = end_logits.masked_fill(~valid, -1e9)
+
+#     B, S = start_scores.shape
+#     best_s = torch.zeros(B, dtype=torch.long, device=start_scores.device)
+#     best_e = torch.zeros(B, dtype=torch.long, device=start_scores.device)
+#     best_val = torch.full((B,), -1e9, device=start_scores.device)
+
+#     for b in range(B):
+#         cur = -1e9; bs = be = 0
+#         for s in range(S):
+#             if start_scores[b, s] <= -1e8:  # invalid
+#                 continue
+#             e_max = min(S - 1, s + max_answer_len)
+#             e_slice = end_scores[b, s:e_max + 1]
+#             if e_slice.numel() == 0: 
+#                 continue
+#             e_rel = int(torch.argmax(e_slice))
+#             e = s + e_rel
+#             val = (start_scores[b, s] + end_scores[b, e]).item()
+#             if val > cur:
+#                 cur = val; bs = s; be = e
+#         best_s[b], best_e[b], best_val[b] = bs, be, cur
+#     return best_s, best_e, best_val
+def best_span_and_score(start_logits, end_logits, attn_mask, context_mask, max_answer_len=50):
+    """
+    Tính best span theo (start+end) score, chỉ trên token hợp lệ (không pad & thuộc context).
+    Ổn định với AMP: ép về float32 để tránh overflow khi masked_fill giá trị âm lớn.
+    """
+    import torch
+
     # valid = vừa không pad, vừa là token thuộc context
     valid = (attn_mask == 1) & (context_mask == 1)
-    start_scores = start_logits.masked_fill(~valid, -1e9)
-    end_scores   = end_logits.masked_fill(~valid, -1e9)
 
-    B, S = start_scores.shape
-    best_s = torch.zeros(B, dtype=torch.long, device=start_scores.device)
-    best_e = torch.zeros(B, dtype=torch.long, device=start_scores.device)
-    best_val = torch.full((B,), -1e9, device=start_scores.device)
+    # Dùng float32 để tránh overflow trong fp16
+    s = start_logits.float().clone()
+    e = end_logits.float().clone()
+
+    NEG = -1e30  # đủ nhỏ cho float32
+    s.masked_fill_(~valid, NEG)
+    e.masked_fill_(~valid, NEG)
+
+    B, S = s.shape
+    device = s.device
+
+    best_s  = torch.zeros(B, dtype=torch.long, device=device)
+    best_e  = torch.zeros(B, dtype=torch.long, device=device)
+    best_val = torch.full((B,), NEG, device=device, dtype=s.dtype)
 
     for b in range(B):
-        cur = -1e9; bs = be = 0
-        for s in range(S):
-            if start_scores[b, s] <= -1e8:  # invalid
+        cur = NEG; bs = be = 0
+        sb = s[b]; eb = e[b]
+        for st in range(S):
+            if sb[st] <= NEG/2:  # invalid nhanh
                 continue
-            e_max = min(S - 1, s + max_answer_len)
-            e_slice = end_scores[b, s:e_max + 1]
-            if e_slice.numel() == 0: 
+            e_max = min(S - 1, st + max_answer_len)
+            if e_max < st: 
+                continue
+            # e tốt nhất trong cửa sổ [st, e_max]
+            e_slice = eb[st:e_max + 1]
+            if e_slice.numel() == 0:
                 continue
             e_rel = int(torch.argmax(e_slice))
-            e = s + e_rel
-            val = (start_scores[b, s] + end_scores[b, e]).item()
+            ed = st + e_rel
+            val = (sb[st] + eb[ed]).item()
             if val > cur:
-                cur = val; bs = s; be = e
+                cur = val; bs = st; be = ed
         best_s[b], best_e[b], best_val[b] = bs, be, cur
-    return best_s, best_e, best_val
 
+    # Trả best_val cùng dtype với logits đầu vào nếu bạn cần
+    return best_s, best_e, best_val.to(start_logits.dtype)
 # def evaluate(model, tokenizer, loader, device):
 #     model.eval()
 #     losses = []
