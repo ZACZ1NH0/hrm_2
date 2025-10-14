@@ -11,7 +11,7 @@ from transformers import AutoTokenizer, AutoModel
 
 from hrm_core import HRMCoreConfig, HRMForQA
 from datasets.hotpotqa import HotpotQADataset, collate_train, collate_eval
-
+from hrm_core.model_bertqa import HRMBertForQA
 
 # --------- Utils: metrics ---------
 import re, string
@@ -226,6 +226,8 @@ def main():
     parser.add_argument('--out_dir', type=str, default='checkpoints')
     parser.add_argument('--encoder_name', type=str, default='', help='HF encoder name, e.g., bert-base-uncased')
     parser.add_argument('--freeze_encoder', action='store_true')
+    parser.add_argument('--fuse_bert_qa', action='store_true')
+    parser.add_argument('--alpha', type=float, default=0.6)
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -235,6 +237,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer or args.encoder_name or 'bert-base-uncased', use_fast=True)
     
     encoder = None
+    
     if args.encoder_name:
         encoder = AutoModel.from_pretrained(args.encoder_name).to(device)
         if args.freeze_encoder:
@@ -246,12 +249,21 @@ def main():
 
     train_ld = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=2, collate_fn=collate_train)
     dev_ld = DataLoader(dev_ds, batch_size=args.batch_size, shuffle=False, num_workers=2, collate_fn=collate_eval)
-
-    # Model
-    cfg = HRMCoreConfig(vocab_size=tokenizer.vocab_size, max_position_embeddings=args.max_length,
+    if args.encoder_name and args.fuse_bert_qa:
+        # Dùng BERT encoder + blend QA head
+        enc_name = args.encoder_name
+        cfg = HRMCoreConfig(vocab_size=0, max_position_embeddings=args.max_length,
                         hidden_size=768, num_heads=12, ff_mult=4, H_layers=2, L_layers=2,
-                        H_cycles=2, L_cycles=1)
-    model = HRMForQA(cfg).to(device)
+                        H_cycles=3, L_cycles=1)
+        model = HRMBertForQA(cfg, encoder_name=enc_name, alpha=args.alpha, freeze_encoder=args.freeze_encoder).to(device)
+    else:
+        # Giữ đường cũ HRMForQA (embedding riêng)
+        cfg = HRMCoreConfig(vocab_size=tokenizer.vocab_size, max_position_embeddings=args.max_length,
+                        hidden_size=768, num_heads=12, ff_mult=4, H_layers=2, L_layers=2,
+                        H_cycles=3, L_cycles=1)
+        model = HRMForQA(cfg).to(device)
+    # Model
+    
 
     # Optimizer (standard AdamW)
     opt = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
