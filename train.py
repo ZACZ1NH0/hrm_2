@@ -303,6 +303,9 @@ def main():
         pbar = tqdm(DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=2, collate_fn=collate_train),
                     desc=f"train epoch {epoch}")
         scaler = torch.cuda.amp.GradScaler()
+        total_loss = 0.0
+        step_count = 0
+        
         for batch in pbar:
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
