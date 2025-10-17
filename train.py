@@ -56,17 +56,6 @@ def set_seed(seed: int = 42):
 
 # --------- Train/Eval ---------
 
-# def best_span(start_logits: torch.Tensor, end_logits: torch.Tensor, attn_mask: torch.Tensor):
-#     """Greedy best span per item: pick best start, then best end >= start among unmasked tokens."""
-#     B, S = start_logits.shape
-#     starts = start_logits.masked_fill(attn_mask == 0, -1e9).argmax(dim=1)  # [B]
-#     ends = []
-#     for b in range(B):
-#         s = starts[b].item()
-#         end = end_logits[b].masked_fill((attn_mask[b] == 0) | (torch.arange(S, device=end_logits.device) < s), -1e9).argmax().item()
-#         ends.append(end)
-#     ends = torch.tensor(ends, device=start_logits.device)
-#     return starts, ends
 def best_span(start_logits, end_logits, attn_mask, max_answer_len=30):
     B, S = start_logits.shape
     start_scores = start_logits.masked_fill(attn_mask == 0, -1e9)
@@ -91,33 +80,6 @@ def best_span(start_logits, end_logits, attn_mask, max_answer_len=30):
         best_s[b] = bs; best_e[b] = be
     return best_s, best_e
 
-# def best_span_and_score(start_logits, end_logits, attn_mask, context_mask, max_answer_len=30):
-#     # valid = vừa không pad, vừa là token thuộc context
-#     valid = (attn_mask == 1) & (context_mask == 1)
-#     start_scores = start_logits.masked_fill(~valid, -1e9)
-#     end_scores   = end_logits.masked_fill(~valid, -1e9)
-
-#     B, S = start_scores.shape
-#     best_s = torch.zeros(B, dtype=torch.long, device=start_scores.device)
-#     best_e = torch.zeros(B, dtype=torch.long, device=start_scores.device)
-#     best_val = torch.full((B,), -1e9, device=start_scores.device)
-
-#     for b in range(B):
-#         cur = -1e9; bs = be = 0
-#         for s in range(S):
-#             if start_scores[b, s] <= -1e8:  # invalid
-#                 continue
-#             e_max = min(S - 1, s + max_answer_len)
-#             e_slice = end_scores[b, s:e_max + 1]
-#             if e_slice.numel() == 0: 
-#                 continue
-#             e_rel = int(torch.argmax(e_slice))
-#             e = s + e_rel
-#             val = (start_scores[b, s] + end_scores[b, e]).item()
-#             if val > cur:
-#                 cur = val; bs = s; be = e
-#         best_s[b], best_e[b], best_val[b] = bs, be, cur
-#     return best_s, best_e, best_val
 def best_span_and_score(start_logits, end_logits, attn_mask, context_mask, max_answer_len=50):
     """
     Tính best span theo (start+end) score, chỉ trên token hợp lệ (không pad & thuộc context).
@@ -165,94 +127,7 @@ def best_span_and_score(start_logits, end_logits, attn_mask, context_mask, max_a
 
     # Trả best_val cùng dtype với logits đầu vào nếu bạn cần
     return best_s, best_e, best_val.to(start_logits.dtype)
-# def evaluate(model, tokenizer, loader, device):
-#     model.eval()
-#     losses = []
-#     ems, f1s = [], []
-#     with torch.no_grad():
-#         for batch in tqdm(loader, desc="eval", leave=False):
-#             input_ids = batch['input_ids'].to(device)
-#             attention_mask = batch['attention_mask'].to(device)
-#             start_positions = None
-#             end_positions = None
-#             if 'start_positions' in batch:
-#                 start_positions = batch['start_positions'].to(device)
-#                 end_positions = batch['end_positions'].to(device)
 
-#             out = model(input_ids=input_ids, attention_mask=attention_mask,
-#                         start_positions=start_positions, end_positions=end_positions)
-#             if 'loss' in out:
-#                 losses.append(out['loss'].item())
-
-#             # Decode predictions
-#             s_idx, e_idx = best_span(out['start_logits'], out['end_logits'], attention_mask)
-#             for i in range(input_ids.size(0)):
-#                 pred_ids = input_ids[i, s_idx[i]:e_idx[i] + 1].detach().cpu().tolist()
-#                 pred_text = tokenizer.decode(pred_ids, skip_special_tokens=True)
-#                 gold_text = batch['answer_text'][i]
-#                 ems.append(exact_match_score(pred_text, gold_text))
-#                 f1s.append(f1_score(pred_text, gold_text))
-
-#     avg_loss = float(np.mean(losses)) if losses else 0.0
-#     avg_em = float(np.mean(ems)) if ems else 0.0
-#     avg_f1 = float(np.mean(f1s)) if f1s else 0.0
-#     return {"loss": avg_loss, "EM": avg_em, "F1": avg_f1}
-# def evaluate(model, tokenizer, loader, device, encoder=None, amp=False, max_answer_len=30):
-#     import contextlib, numpy as np
-#     model.eval()
-#     losses = []
-#     id2best = {}  # id -> {'pred': str, 'gold': str, 'score': float}
-
-#     autocast_ctx = (torch.autocast("cuda", enabled=amp and torch.cuda.is_available())
-#                     if torch.cuda.is_available() else contextlib.nullcontext())
-
-#     with torch.no_grad():
-#         for batch in tqdm(loader, desc="eval", leave=False):
-#             input_ids = batch['input_ids'].to(device)
-#             attention_mask = batch['attention_mask'].to(device)
-#             context_mask = batch['context_mask'].to(device)
-
-#             with autocast_ctx:
-#                 if encoder is not None :
-#                     enc_out = encoder(input_ids=input_ids, attention_mask=attention_mask, return_dict=True).last_hidden_state
-#                     enc_out = enc_out.to(model.ln_in.weight.dtype)
-#                     out = model(attention_mask=attention_mask, inputs_embeds=enc_out)
-#                 else:
-#                     out = model(input_ids=input_ids, attention_mask=attention_mask)
-
-#             if 'start_positions' in batch:  # optional dev loss
-#                 start_positions = batch['start_positions'].to(device)
-#                 end_positions   = batch['end_positions'].to(device)
-#                 with autocast_ctx:
-#                     if encoder is not None:
-#                         out_loss = model(attention_mask=attention_mask, inputs_embeds=enc_out,
-#                                          start_positions=start_positions, end_positions=end_positions)
-#                     else:
-#                         out_loss = model(input_ids=input_ids, attention_mask=attention_mask,
-#                                          start_positions=start_positions, end_positions=end_positions)
-#                 losses.append(out_loss['loss'].item())
-
-#             s_idx, e_idx, span_val = best_span_and_score(
-#                 out['start_logits'], out['end_logits'], attention_mask, context_mask, max_answer_len
-#             )
-
-#             for i in range(input_ids.size(0)):
-#                 ex_id = batch['id'][i]
-#                 pred_ids = input_ids[i, s_idx[i]: e_idx[i] + 1].detach().cpu().tolist()
-#                 pred_text = tokenizer.decode(pred_ids, skip_special_tokens=True)
-#                 score = float(span_val[i].item())
-#                 gold_text = batch['answer_text'][i]
-#                 rec = id2best.get(ex_id)
-#                 if (rec is None) or (score > rec['score']):
-#                     id2best[ex_id] = {'pred': pred_text, 'gold': gold_text, 'score': score}
-
-#     ems = [exact_match_score(v['pred'], v['gold']) for v in id2best.values()]
-#     f1s = [f1_score(v['pred'], v['gold']) for v in id2best.values()]
-#     return {
-#         "loss": float(np.mean(losses)) if losses else 0.0,
-#         "EM": float(np.mean(ems)) if ems else 0.0,
-#         "F1": float(np.mean(f1s)) if f1s else 0.0,
-#     }
 def evaluate(
     model,
     tokenizer,
@@ -365,7 +240,7 @@ def main():
     parser.add_argument('--max_length', type=int, default=512)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--epochs', type=int, default=5)
-    parser.add_argument('--lr', type=float, default=5e-4)
+    parser.add_argument('--lr', type=float, default=0.005)
     parser.add_argument('--weight_decay', type=float, default=0.01)
     parser.add_argument('--grad_clip', type=float, default=1.0)
     parser.add_argument('--seed', type=int, default=42)
