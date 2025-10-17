@@ -46,6 +46,7 @@ class HRMCoreInner(nn.Module):
         z_L: torch.Tensor,
         token_embeddings: torch.Tensor,
         key_padding_mask: Optional[torch.Tensor],
+        approx_one_step: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Trả về (H_out, L_last) với H_out là tổ hợp soft‑halting của các bước H.
         Shapes:
@@ -62,8 +63,15 @@ class HRMCoreInner(nn.Module):
 
         for _ in range(self.cfg.H_cycles):
             # L có thể lặp nhiều vòng nhỏ dưới sự điều khiển của H hiện tại
-            for _ in range(self.cfg.L_cycles):
-                x_L = self.L_level(x_L, injected=x_H + token_embeddings, key_padding_mask=key_padding_mask)
+            if approx_one_step:
+            # One-step gradient approximation: không lan truyền gradient qua inner loop
+                with torch.no_grad():
+                    for _ in range(self.cfg.L_cycles):
+                        x_L = self.L_level(x_L, injected=x_H + token_embeddings, key_padding_mask=key_padding_mask)
+            else:
+            # Full backprop: gradient đầy đủ qua H–L
+                for _ in range(self.cfg.L_cycles):
+                    x_L = self.L_level(x_L, injected=x_H + token_embeddings, key_padding_mask=key_padding_mask)
 
             # H cập nhật dựa trên L (đã phản ánh input)
             x_H = self.H_level(x_H, injected=x_L, key_padding_mask=key_padding_mask)

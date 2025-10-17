@@ -233,6 +233,8 @@ def evaluate(
 # --------- Main ---------
 
 def main():
+    import csv
+    import os
     parser = argparse.ArgumentParser()
     parser.add_argument('--train_path', type=str, required=True, help='./hotpot_train_v1.1.json')
     parser.add_argument('--dev_path', type=str, required=True, help='./hotpot_dev_distractor_v1.json')
@@ -253,6 +255,11 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
     set_seed(args.seed)
+    #log
+    log_path = os.path.join(args.out_dir, "train_log.csv")
+    with open(log_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["epoch", "train_loss", "dev_loss", "dev_F1", "dev_EM"])
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer or args.encoder_name or 'bert-base-uncased', use_fast=True)
@@ -323,6 +330,8 @@ def main():
                         end_positions=end_positions)
             
             loss = out['loss']
+            total_loss += loss.item()
+            step_count += 1
 
             opt.zero_grad()
             scaler.scale(loss).backward()
@@ -335,7 +344,8 @@ def main():
 
             global_step += 1
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
-
+        
+        avg_train_loss = total_loss / step_count
         # Eval
         metrics = evaluate(
             model, tokenizer, dev_ld, device,
@@ -346,6 +356,10 @@ def main():
             boost_sf=0.0               
             )
         print(f"Epoch {epoch}: dev loss={metrics['loss']:.4f} EM={metrics['EM']*100:.2f} F1={metrics['F1']*100:.2f}")
+        # Save log
+        with open(log_path, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([epoch, avg_train_loss, metrics['loss'], metrics['F1'], metrics['EM']])
         # Save best
         if metrics['F1'] > best_f1:
             best_f1 = metrics['F1']
