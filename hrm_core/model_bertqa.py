@@ -14,7 +14,7 @@ class HRMBertForQA(nn.Module):
     def __init__(self, cfg: HRMCoreConfig, encoder_name: str = 'bert-base-uncased', alpha: float = 0.5, freeze_encoder: bool = False):
         super().__init__()
         self.cfg = cfg
-        self.alpha = alpha
+        self.alpha = nn.Parameter(torch.tensor(alpha))
 
         # ===== BERT encoder & QA head gốc =====
         self.enc_cfg = AutoConfig.from_pretrained(encoder_name)
@@ -62,7 +62,9 @@ class HRMBertForQA(nn.Module):
         logits_b = self.bert_qa(x)       # [B,S,2]
 
         # Blend logits
-        logits = self.alpha * logits_h + (1.0 - self.alpha) * logits_b
+        
+        a = torch.sigmoid(self.alpha)
+        logits = a * logits_h + (1.0 - a) * logits_b
         start_logits, end_logits = logits[..., 0], logits[..., 1]
 
         out = {"start_logits": start_logits, "end_logits": end_logits}

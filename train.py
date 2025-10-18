@@ -136,8 +136,8 @@ def evaluate(
     encoder=None,                 # chỉ dùng khi fuse_bert_qa=False
     amp=False,
     max_answer_len=50,            # Hotpot nhiều đáp án dài, nên 50
-    fuse_bert_qa=False,           # =True nếu dùng HRMBertForQA
-    boost_sf=0.0                  # >0 để ưu tiên token thuộc supporting facts (nếu có sf_mask)
+    fuse_bert_qa= True,           # =True nếu dùng HRMBertForQA
+    boost_sf=0.8                  # >0 để ưu tiên token thuộc supporting facts (nếu có sf_mask)
 ):
     import contextlib, numpy as np
     model.eval()
@@ -355,8 +355,8 @@ def main():
             encoder=None,              
             amp=True,
             max_answer_len=50,
-            fuse_bert_qa=True,
-            boost_sf=0.0               
+            fuse_bert_qa= args.fuse_bert_qa,
+            boost_sf=0.8               
             )
         print(f"Epoch {epoch}: dev loss={metrics['loss']:.4f} EM={metrics['EM']*100:.2f} F1={metrics['F1']*100:.2f}")
         # Save log

@@ -13,16 +13,19 @@ class TransformerBlock(nn.Module):
         self.ff = nn.Sequential(
             nn.Linear(hidden_size, ff_mult * hidden_size),
             nn.GELU(),
+            nn.Dropout(0.1),
             nn.Linear(ff_mult * hidden_size, hidden_size),
+            nn.Dropout(0.1),
         )
+        self.res_scale = 0.5 # Residual scaling nhỏ
         self.ln1 = nn.LayerNorm(hidden_size)
         self.ln2 = nn.LayerNorm(hidden_size)
 
     def forward(self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         qkv = self.ln1(x)
         a, _ = self.attn(qkv, qkv, qkv, key_padding_mask=key_padding_mask, need_weights=False)
-        x = x + a
-        x = x + self.ff(self.ln2(x))
+        x = x + self.res_scale * a
+        x = x + self.res_scale * self.ff(self.ln2(x))
         return x
 
 
@@ -36,10 +39,12 @@ class GatedFusion(nn.Module):
         self.wx = nn.Linear(hidden_size, hidden_size, bias=True)
         self.wi = nn.Linear(hidden_size, hidden_size, bias=False)
         self.sig = nn.Sigmoid()
+        self.mix = nn.Linear(2*hidden_size, hidden_size)
 
     def forward(self, x: torch.Tensor, injected: torch.Tensor) -> torch.Tensor:
         gate = self.sig(self.wx(x) + self.wi(injected))
-        return x + gate * injected
+        # return x + gate * injected
+        return self.mix(torch.cat([x, x + gate*injected], dim=-1))
 
 
 class ReasoningModule(nn.Module):
