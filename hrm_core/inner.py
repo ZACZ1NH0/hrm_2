@@ -46,7 +46,7 @@ class HRMCoreInner(nn.Module):
         z_L: torch.Tensor,
         token_embeddings: torch.Tensor,
         key_padding_mask: Optional[torch.Tensor],
-        approx_one_step: bool = True,
+        approx_one_step: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Trả về (H_out, L_last) với H_out là tổ hợp soft‑halting của các bước H.
         Shapes:
