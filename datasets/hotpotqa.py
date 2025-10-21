@@ -36,7 +36,8 @@ class HotpotQADataset(Dataset):
                 "answer_start": int(ex.get("answer_start")),
             }
             sf_char_spans = ex.get("sf_char_spans")  # ví dụ: [[s1,e1], [s2,e2], ...] theo char trong context
-
+            if sf_char_spans is None:
+                sf_char_spans = _build_sf_char_spans(ex)
             enc = self.tokenizer(
                 qa["question"], qa["context"],
                 return_offsets_mapping=True,
@@ -141,3 +142,21 @@ def collate_eval(batch):
         out["start_positions"] = torch.stack([b["start_positions"] for b in batch])
         out["end_positions"] = torch.stack([b["end_positions"] for b in batch])
     return out
+
+def _build_sf_char_spans(ex):
+    sf_pairs = ex.get("supporting_facts") or []
+    context = ex.get("context")
+    spans = []
+
+    # context của HotpotQA: list [[title, [sent1, sent2,...]], ...]
+    if isinstance(context, list) and len(context) > 0 and isinstance(context[0], list):
+        char_cursor = 0
+        for title, sents in context:
+            for i, sent in enumerate(sents):
+                st, ed = char_cursor, char_cursor + len(sent)
+                # nếu (title, i) thuộc supporting_facts -> thêm vào spans
+                if [title, i] in sf_pairs:
+                    spans.append([st, ed])
+                char_cursor = ed + 1  # +1 cho dấu ngắt
+        return spans
+    return None
