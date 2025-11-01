@@ -272,8 +272,8 @@ def main():
             for p in encoder.parameters():
                 p.requires_grad = False
     # Data
-    train_ds = HotpotQADataset(args.train_path, tokenizer, max_length=args.max_length, doc_stride=128, is_train=True)
-    dev_ds = HotpotQADataset(args.dev_path, tokenizer, max_length=args.max_length, doc_stride=128, is_train=True)
+    train_ds = HotpotQADataset(args.train_path, tokenizer, max_length=args.max_length, doc_stride=160, is_train=True)
+    dev_ds = HotpotQADataset(args.dev_path, tokenizer, max_length=args.max_length, doc_stride=160, is_train=True)
 
     train_ld = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=2, collate_fn=collate_train)
     dev_ld = DataLoader(dev_ds, batch_size=args.batch_size, shuffle=False, num_workers=2, collate_fn=collate_eval)
