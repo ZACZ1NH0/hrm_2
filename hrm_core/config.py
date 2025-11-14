@@ -12,8 +12,8 @@ class HRMCoreConfig:
     # Hierarchical controller
     H_layers: int = 2
     L_layers: int = 2
-    H_cycles: int = 3   # tăng mặc định để soft‑halting có đất dụng
-    L_cycles: int = 1
+    H_cycles: int = 4   # tăng mặc định để soft‑halting có đất dụng
+    L_cycles: int = 3
 
     # I/O
     tie_embeddings: bool = False

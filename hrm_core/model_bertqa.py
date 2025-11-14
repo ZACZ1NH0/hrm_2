@@ -68,7 +68,7 @@ class HRMBertForQA(nn.Module):
         start_logits, end_logits = logits[..., 0], logits[..., 1]
 
         out = {"start_logits": start_logits, "end_logits": end_logits}
-
+        #loss
         if start_positions is not None and end_positions is not None:
             ignored_index = start_logits.size(1)
             start_positions = start_positions.clamp(0, ignored_index)
