@@ -10,10 +10,10 @@ class HRMCoreConfig:
     max_position_embeddings: int = 512
 
     # Hierarchical controller
-    H_layers: int = 2
-    L_layers: int = 2
+    H_layers: int = 3
+    L_layers: int = 3
     H_cycles: int = 4   # tăng mặc định để soft‑halting có đất dụng
-    L_cycles: int = 3
+    L_cycles: int = 4
 
     # I/O
     tie_embeddings: bool = False
