@@ -447,7 +447,11 @@ def main():
             start_positions = batch['start_positions'].to(device)
             end_positions = batch['end_positions'].to(device)
 
-            sf_mask = batch['sf_mask'].to(device) # 20/3/2026
+            # sf_mask = batch['sf_mask'].to(device) # 20/3/2026
+            sf_mask = batch.get('sf_mask')
+            if sf_mask is not None:
+                sf_mask = sf_mask.to(device)
+                
             if args.fuse_bert_qa:
                 out = model(
                     input_ids=input_ids,

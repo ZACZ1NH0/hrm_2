@@ -84,9 +84,9 @@ class HotpotQADataset(Dataset):
                         start_pos, end_pos = s, e
 
                 # --- optional supporting‑fact mask ---
-                sf_mask = None
+                sf_mask = torch.zeros(S, dtype=torch.long) # Khởi tạo mặc định là 0
                 if sf_char_spans:
-                    sf_mask = torch.zeros(S, dtype=torch.long)
+
                     for (cs, ce) in sf_char_spans:
                         for ti, (sid, (st, ed)) in enumerate(zip(seq_ids, offsets.tolist())):
                             if sid != 1:
@@ -100,9 +100,8 @@ class HotpotQADataset(Dataset):
                     "id": qa["id"],
                     "answer_text": qa["answer_text"],
                     "context_mask": context_mask,
+                    "sf_mask": sf_mask,
                 }
-                if sf_mask is not None:
-                    feat["sf_mask"] = sf_mask
                 if self.is_train:
                     feat["start_positions"] = torch.tensor(start_pos, dtype=torch.long)
                     feat["end_positions"] = torch.tensor(end_pos, dtype=torch.long)
@@ -115,16 +114,45 @@ class HotpotQADataset(Dataset):
         return self.features[idx]
 
 
+# def collate_train(batch):
+#     out = {
+#         "input_ids": torch.stack([b["input_ids"] for b in batch]),
+#         "attention_mask": torch.stack([b["attention_mask"] for b in batch]),
+#         "context_mask": torch.stack([b["context_mask"] for b in batch]),
+#         "start_positions": torch.stack([b["start_positions"] for b in batch]),
+#         "end_positions": torch.stack([b["end_positions"] for b in batch]),
+#     }
+#     if "sf_mask" in batch[0]:
+#         out["sf_mask"] = torch.stack([b["sf_mask"] for b in batch])
+#     return out
 def collate_train(batch):
+    # Lấy các trường cơ bản
+    input_ids = torch.stack([b["input_ids"] for b in batch])
+    attention_mask = torch.stack([b["attention_mask"] for b in batch])
+    context_mask = torch.stack([b["context_mask"] for b in batch])
+    start_positions = torch.stack([b["start_positions"] for b in batch])
+    end_positions = torch.stack([b["end_positions"] for b in batch])
+    
     out = {
-        "input_ids": torch.stack([b["input_ids"] for b in batch]),
-        "attention_mask": torch.stack([b["attention_mask"] for b in batch]),
-        "context_mask": torch.stack([b["context_mask"] for b in batch]),
-        "start_positions": torch.stack([b["start_positions"] for b in batch]),
-        "end_positions": torch.stack([b["end_positions"] for b in batch]),
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "context_mask": context_mask,
+        "start_positions": start_positions,
+        "end_positions": end_positions,
     }
-    if "sf_mask" in batch[0]:
-        out["sf_mask"] = torch.stack([b["sf_mask"] for b in batch])
+
+    # Xử lý sf_mask an toàn
+    if any("sf_mask" in b for b in batch):
+        # Nếu mẫu nào thiếu sf_mask, tạo tensor 0 cùng kích thước
+        seq_len = input_ids.size(1)
+        sf_list = []
+        for b in batch:
+            if "sf_mask" in b:
+                sf_list.append(b["sf_mask"])
+            else:
+                sf_list.append(torch.zeros(seq_len, dtype=torch.long))
+        out["sf_mask"] = torch.stack(sf_list)
+        
     return out
 
 
