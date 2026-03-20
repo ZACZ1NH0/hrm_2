@@ -128,21 +128,146 @@ def best_span_and_score(start_logits, end_logits, attn_mask, context_mask, max_a
     # Trả best_val cùng dtype với logits đầu vào nếu bạn cần
     return best_s, best_e, best_val.to(start_logits.dtype)
 
+# def evaluate(
+#     model,
+#     tokenizer,
+#     loader,
+#     device,
+#     encoder=None,                 # chỉ dùng khi fuse_bert_qa=False
+#     amp=False,
+#     max_answer_len=50,            # Hotpot nhiều đáp án dài, nên 50
+#     fuse_bert_qa= True,           # =True nếu dùng HRMBertForQA
+#     boost_sf=0.8                  # >0 để ưu tiên token thuộc supporting facts (nếu có sf_mask)
+# ):
+#     import contextlib, numpy as np
+#     model.eval()
+#     losses = []
+#     id2best = {}  # id -> {'pred': str, 'gold': str, 'score': float}
+
+#     autocast_ctx = (torch.autocast("cuda", enabled=amp and torch.cuda.is_available())
+#                     if torch.cuda.is_available() else contextlib.nullcontext())
+
+#     with torch.no_grad():
+#         for batch in tqdm(loader, desc="eval", leave=False):
+#             input_ids      = batch['input_ids'].to(device)
+#             attention_mask = batch['attention_mask'].to(device)
+#             context_mask   = batch['context_mask'].to(device)
+#             sf_mask_gold = batch['sf_mask'].to(device) # 20/3/2026
+#             sf_logits = out['sf_logits'] # [B, S] # 20/3/2026
+#             sf_pred = (torch.sigmoid(sf_logits) > 0.5).int()# 20/3/2026
+
+#             # Nhãn (có thể có hoặc không)
+#             start_positions = batch.get('start_positions', None)
+#             end_positions   = batch.get('end_positions', None)
+#             if start_positions is not None:
+#                 start_positions = start_positions.to(device)
+#                 end_positions   = end_positions.to(device)
+
+#             with autocast_ctx:
+#                 if fuse_bert_qa:
+#                     # HRMBertForQA: KHÔNG dùng inputs_embeds, KHÔNG dùng encoder ngoài
+#                     out = model(
+#                         input_ids=input_ids,
+#                         attention_mask=attention_mask,
+#                         start_positions=start_positions,
+#                         end_positions=end_positions,
+#                         sf_mask=sf_mask_gold
+#                     )
+#                 else:
+#                     # Đường cũ: có thể có encoder ngoài → dùng inputs_embeds
+#                     if encoder is not None:
+#                         enc_out = encoder(
+#                             input_ids=input_ids,
+#                             attention_mask=attention_mask,
+#                             return_dict=True
+#                         ).last_hidden_state
+#                         enc_out = enc_out.to(model.ln_in.weight.dtype)
+#                         out = model(
+#                             attention_mask=attention_mask,
+#                             inputs_embeds=enc_out,
+#                             start_positions=start_positions,
+#                             end_positions=end_positions,
+#                             sf_mask=sf_mask_gold
+#                         )
+#                     else:
+#                         out = model(
+#                             input_ids=input_ids,
+#                             attention_mask=attention_mask,
+#                             start_positions=start_positions,
+#                             end_positions=end_positions,
+#                             sf_mask=sf_mask_gold
+#                         )
+
+#             if 'loss' in out:
+#                 losses.append(out['loss'].item())
+
+#             # ----- Decode span -----
+#             start_logits = out['start_logits']
+#             end_logits   = out['end_logits']
+
+#             # (tùy chọn) ưu tiên supporting facts nếu có
+#             if boost_sf > 0.0 and ('sf_mask' in batch):
+#                 sf = batch['sf_mask'].to(device).float()
+#                 start_logits = start_logits + boost_sf * sf
+#                 end_logits   = end_logits   + boost_sf * sf
+
+#             # Dùng hàm best_span_and_score sẵn có
+#             s_idx, e_idx, span_val = best_span_and_score(
+#                 start_logits, end_logits, attention_mask, context_mask, max_answer_len
+#             )
+
+#             # Gộp theo sample id (nhiều feature/overflow → giữ best theo score)
+#             for i in range(input_ids.size(0)):
+#                 ex_id = batch['id'][i]
+
+#                 valid_idx = (batch['attention_mask'][i] == 1)
+
+#                 # --------------20/3/2026---------------------------
+#                 curr_sf_pred = sf_pred[i][valid_idx].cpu().numpy()
+#                 curr_sf_gold = sf_mask_gold[i][valid_idx].cpu().numpy()
+#                 tp = np.sum((curr_sf_pred == 1) & (curr_sf_gold == 1))
+#                 fp = np.sum((curr_sf_pred == 1) & (curr_sf_gold == 0))
+#                 fn = np.sum((curr_sf_pred == 0) & (curr_sf_gold == 1))
+                
+#                 prec = tp / (tp + fp) if (tp + fp) > 0 else 0
+#                 rec = tp / (tp + fn) if (tp + fn) > 0 else 0
+#                 sf_f1 = (2 * prec * rec) / (prec + rec) if (prec + rec) > 0 else 0
+#                 #----------------------------------------------------
+
+#                 pred_ids = input_ids[i, s_idx[i]: e_idx[i] + 1].detach().cpu().tolist()
+#                 pred_text = tokenizer.decode(pred_ids, skip_special_tokens=True)
+#                 score = float(span_val[i].item())
+#                 gold_text = batch['answer_text'][i]
+#                 rec = id2best.get(ex_id)
+#                 if (rec is None) or (score > rec['score']):
+#                     id2best[ex_id] = {'pred': pred_text, 'gold': gold_text, 'score': score}
+
+                
+
+#     ems = [exact_match_score(v['pred'], v['gold']) for v in id2best.values()]
+#     f1s = [f1_score(v['pred'], v['gold']) for v in id2best.values()]
+#     joint_f1 = f1s * sf_f1
+#     return {
+#         "loss": float(np.mean(losses)) if losses else 0.0,
+#         "EM": float(np.mean(ems)) if ems else 0.0,
+#         "F1": float(np.mean(f1s)) if f1s else 0.0,
+#         "Joint_F1": float(np.mean(joint_f1)) if joint_f1 else 0.0,
+#     }
 def evaluate(
     model,
     tokenizer,
     loader,
     device,
-    encoder=None,                 # chỉ dùng khi fuse_bert_qa=False
+    encoder=None,
     amp=False,
-    max_answer_len=50,            # Hotpot nhiều đáp án dài, nên 50
-    fuse_bert_qa= True,           # =True nếu dùng HRMBertForQA
-    boost_sf=0.8                  # >0 để ưu tiên token thuộc supporting facts (nếu có sf_mask)
+    max_answer_len=50,
+    fuse_bert_qa=True,
+    boost_sf=0.8
 ):
     import contextlib, numpy as np
     model.eval()
     losses = []
-    id2best = {}  # id -> {'pred': str, 'gold': str, 'score': float}
+    id2best = {} 
 
     autocast_ctx = (torch.autocast("cuda", enabled=amp and torch.cuda.is_available())
                     if torch.cuda.is_available() else contextlib.nullcontext())
@@ -152,8 +277,8 @@ def evaluate(
             input_ids      = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
             context_mask   = batch['context_mask'].to(device)
+            sf_mask_gold   = batch['sf_mask'].to(device)
 
-            # Nhãn (có thể có hoặc không)
             start_positions = batch.get('start_positions', None)
             end_positions   = batch.get('end_positions', None)
             if start_positions is not None:
@@ -161,74 +286,84 @@ def evaluate(
                 end_positions   = end_positions.to(device)
 
             with autocast_ctx:
+                # 1. Chạy model trước để lấy output
                 if fuse_bert_qa:
-                    # HRMBertForQA: KHÔNG dùng inputs_embeds, KHÔNG dùng encoder ngoài
-                    out = model(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        start_positions=start_positions,
-                        end_positions=end_positions,
-                    )
+                    out = model(input_ids=input_ids, attention_mask=attention_mask,
+                                start_positions=start_positions, end_positions=end_positions,
+                                sf_mask=sf_mask_gold)
                 else:
-                    # Đường cũ: có thể có encoder ngoài → dùng inputs_embeds
-                    if encoder is not None:
-                        enc_out = encoder(
-                            input_ids=input_ids,
-                            attention_mask=attention_mask,
-                            return_dict=True
-                        ).last_hidden_state
-                        enc_out = enc_out.to(model.ln_in.weight.dtype)
-                        out = model(
-                            attention_mask=attention_mask,
-                            inputs_embeds=enc_out,
-                            start_positions=start_positions,
-                            end_positions=end_positions,
-                        )
-                    else:
-                        out = model(
-                            input_ids=input_ids,
-                            attention_mask=attention_mask,
-                            start_positions=start_positions,
-                            end_positions=end_positions,
-                        )
+                    # (Giữ logic cũ của bạn cho HRM đơn thuần ở đây...)
+                    out = model(input_ids=input_ids, attention_mask=attention_mask,
+                                start_positions=start_positions, end_positions=end_positions,
+                                sf_mask=sf_mask_gold)
 
             if 'loss' in out:
                 losses.append(out['loss'].item())
 
-            # ----- Decode span -----
+            # 2. Lấy sf_logits từ output CỦA MODEL
+            sf_logits = out.get('sf_logits')
+            sf_pred = (torch.sigmoid(sf_logits) > 0.5).int() if sf_logits is not None else None
+
+            # Decode span
             start_logits = out['start_logits']
             end_logits   = out['end_logits']
 
-            # (tùy chọn) ưu tiên supporting facts nếu có
-            if boost_sf > 0.0 and ('sf_mask' in batch):
-                sf = batch['sf_mask'].to(device).float()
-                start_logits = start_logits + boost_sf * sf
-                end_logits   = end_logits   + boost_sf * sf
+            # Boost SF nếu cần
+            if boost_sf > 0.0 and sf_logits is not None:
+                start_logits = start_logits + boost_sf * torch.sigmoid(sf_logits)
+                end_logits   = end_logits   + boost_sf * torch.sigmoid(sf_logits)
 
-            # Dùng hàm best_span_and_score sẵn có
             s_idx, e_idx, span_val = best_span_and_score(
                 start_logits, end_logits, attention_mask, context_mask, max_answer_len
             )
 
-            # Gộp theo sample id (nhiều feature/overflow → giữ best theo score)
             for i in range(input_ids.size(0)):
                 ex_id = batch['id'][i]
+                
+                # Tính SF F1 cho sample này
+                sf_f1 = 0.0
+                if sf_pred is not None:
+                    valid_idx = (attention_mask[i] == 1)
+                    curr_sf_pred = sf_pred[i][valid_idx].cpu().numpy()
+                    curr_sf_gold = sf_mask_gold[i][valid_idx].cpu().numpy()
+                    tp = np.sum((curr_sf_pred == 1) & (curr_sf_gold == 1))
+                    fp = np.sum((curr_sf_pred == 1) & (curr_sf_gold == 0))
+                    fn = np.sum((curr_sf_pred == 0) & (curr_sf_gold == 1))
+                    prec = tp / (tp + fp) if (tp + fp) > 0 else 0
+                    rec_sf = tp / (tp + fn) if (tp + fn) > 0 else 0
+                    sf_f1 = (2 * prec * rec_sf) / (prec + rec_sf) if (prec + rec_sf) > 0 else 0
+
                 pred_ids = input_ids[i, s_idx[i]: e_idx[i] + 1].detach().cpu().tolist()
                 pred_text = tokenizer.decode(pred_ids, skip_special_tokens=True)
                 score = float(span_val[i].item())
                 gold_text = batch['answer_text'][i]
-                rec = id2best.get(ex_id)
-                if (rec is None) or (score > rec['score']):
-                    id2best[ex_id] = {'pred': pred_text, 'gold': gold_text, 'score': score}
+                
+                # Cập nhật id2best (chọn span có score cao nhất)
+                current_entry = id2best.get(ex_id)
+                if (current_entry is None) or (score > current_entry['score']):
+                    id2best[ex_id] = {
+                        'pred': pred_text, 
+                        'gold': gold_text, 
+                        'score': score,
+                        'sf_f1': sf_f1  # Lưu lại để tính Joint
+                    }
 
-    ems = [exact_match_score(v['pred'], v['gold']) for v in id2best.values()]
-    f1s = [f1_score(v['pred'], v['gold']) for v in id2best.values()]
+    # 3. Tính Metrics cuối cùng
+    all_samples = list(id2best.values())
+    ems = [exact_match_score(v['pred'], v['gold']) for v in all_samples]
+    f1s = [f1_score(v['pred'], v['gold']) for v in all_samples]
+    sf_f1s = [v['sf_f1'] for v in all_samples]
+    
+    # Công thức Joint F1 chuẩn: Avg(Ans_F1 * SF_F1)
+    joint_f1s = [f * s for f, s in zip(f1s, sf_f1s)]
+
     return {
         "loss": float(np.mean(losses)) if losses else 0.0,
         "EM": float(np.mean(ems)) if ems else 0.0,
         "F1": float(np.mean(f1s)) if f1s else 0.0,
+        "SF_F1": float(np.mean(sf_f1s)) if sf_f1s else 0.0,
+        "Joint_F1": float(np.mean(joint_f1s)) if joint_f1s else 0.0,
     }
-
 
 # --------- Main ---------
 
@@ -311,12 +446,15 @@ def main():
             attention_mask = batch['attention_mask'].to(device)
             start_positions = batch['start_positions'].to(device)
             end_positions = batch['end_positions'].to(device)
+
+            sf_mask = batch['sf_mask'].to(device) # 20/3/2026
             if args.fuse_bert_qa:
                 out = model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
                     start_positions=start_positions,
-                    end_positions=end_positions
+                    end_positions=end_positions,
+                    sf_mask=sf_mask
                     )
             else:
                 if encoder is not None:

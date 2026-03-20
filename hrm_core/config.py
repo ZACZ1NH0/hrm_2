@@ -17,3 +17,5 @@ class HRMCoreConfig:
 
     # I/O
     tie_embeddings: bool = False
+
+    sf_loss_coef: float = 1.0 # 20/3/2026
