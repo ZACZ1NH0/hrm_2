@@ -103,8 +103,8 @@ class HRMBertForQA(nn.Module):
             total_loss = qa_loss
             if sf_mask is not None:
                 # Dùng BCEWithLogitsLoss vì đây là bài toán multilabel (mỗi token có thể là SF hoặc không)
-                pos_weight = torch.tensor([5.0], device=device, pos_weight=pos_weight)
-                sf_loss_fct = nn.BCEWithLogitsLoss(reduction='mean')
+                pos_weight = torch.tensor([5.0], device=device)
+                sf_loss_fct = nn.BCEWithLogitsLoss(reduction='mean', pos_weight=pos_weight)
                 # Chỉ tính loss trên các token không phải PAD
                 if attention_mask is not None:
                     active_loss = attention_mask.view(-1) == 1
