@@ -500,7 +500,7 @@ def main():
             fuse_bert_qa= args.fuse_bert_qa,
             boost_sf=0.8               
             )
-        print(f"Epoch {epoch}: dev loss={metrics['loss']:.4f} EM={metrics['EM']*100:.2f} F1={metrics['F1']*100:.2f}")
+        print(f"Epoch {epoch}: dev loss={metrics['loss']:.4f} EM={metrics['EM']*100:.2f} F1={metrics['F1']*100:.2f} Supporting fact f1 = {metrics['SF_F1']*100:.2f} JointF1 = {metrics['Joint_F1']*100:.2f}"  )
         # Save log
         with open(log_path, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
