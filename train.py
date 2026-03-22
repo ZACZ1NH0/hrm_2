@@ -302,7 +302,7 @@ def evaluate(
 
             # 2. Lấy sf_logits từ output CỦA MODEL
             sf_logits = out.get('sf_logits')
-            sf_pred = (torch.sigmoid(sf_logits) > 0.5).int() if sf_logits is not None else None
+            sf_pred = (torch.sigmoid(sf_logits) > 0.2).int() if sf_logits is not None else None
 
             # Decode span
             start_logits = out['start_logits']

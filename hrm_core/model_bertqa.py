@@ -58,9 +58,12 @@ class HRMBertForQA(nn.Module):
 
         # HRM reasoning → logits_h
         z_H_out, _ = self.inner(z_H, z_L, token_embeddings=x, key_padding_mask=key_padding_mask)
-        sf_logits = self.sf_head(z_H_out)
+        sf_logits = self.sf_head(z_H_out).squeeze(-1)
 
-        logits_h = self.hrm_qa(z_H_out)  # [B,S,2]
+        sf_prob = torch.sigmoid(sf_logits) # [B, S, 1]
+        z_H_focused = z_H_out * (1 + sf_prob)
+
+        logits_h = self.hrm_qa(z_H_focused)  # [B,S,2]
 
         # BERT QA head trực tiếp trên encoder → logits_b
         logits_b = self.bert_qa(x)       # [B,S,2]
@@ -103,7 +106,7 @@ class HRMBertForQA(nn.Module):
             total_loss = qa_loss
             if sf_mask is not None:
                 # Dùng BCEWithLogitsLoss vì đây là bài toán multilabel (mỗi token có thể là SF hoặc không)
-                pos_weight = torch.tensor([5.0], device=device)
+                pos_weight = torch.tensor([20.0], device=device)
                 sf_loss_fct = nn.BCEWithLogitsLoss(reduction='mean', pos_weight=pos_weight)
                 # Chỉ tính loss trên các token không phải PAD
                 if attention_mask is not None:
