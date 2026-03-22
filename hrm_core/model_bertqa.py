@@ -60,8 +60,8 @@ class HRMBertForQA(nn.Module):
         z_H_out, _ = self.inner(z_H, z_L, token_embeddings=x, key_padding_mask=key_padding_mask)
         sf_logits = self.sf_head(z_H_out).squeeze(-1)
 
-        sf_prob = torch.sigmoid(sf_logits) # [B, S, 1]
-        z_H_focused = z_H_out * (1 + sf_prob)
+        sf_prob = torch.sigmoid(sf_logits).unsqueeze(-1) # [B, S, 1]
+        z_H_focused = z_H_out * (1.0 + sf_prob)
 
         logits_h = self.hrm_qa(z_H_focused)  # [B,S,2]
 
@@ -77,7 +77,7 @@ class HRMBertForQA(nn.Module):
         out = {
             "start_logits": start_logits, 
             "end_logits": end_logits, 
-            "sf_logits": sf_logits.squeeze(-1) # [B, S]
+            "sf_logits": sf_logits # [B, S]
         }
         #loss
 
