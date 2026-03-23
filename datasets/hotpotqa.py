@@ -133,8 +133,9 @@ class HotpotQADataset(Dataset):
             qa = {
                 "id": str(ex.get("_id", "")), # Sửa theo JSON mẫu của bạn
                 "question": ex["question"],
-                "context": flat_context,
+                "context": ex["context"],
                 "answer_text": str(ex.get("answer", "")),
+                "answer_start": ex["answer_start"]
             }
 
             # Tìm vị trí answer_start trong flat_context
@@ -282,36 +283,27 @@ def _build_sf_char_spans(ex):
     return None
 
 def _build_flat_context_and_spans(ex):
-    """
-    Nối các câu thành 1 chuỗi và trả về vị trí ký tự chuẩn của Supporting Facts.
-    """
-    context_list = ex.get("context", [])
+    # Sử dụng raw_context (dạng list) để tính vị trí chính xác
+    context_list = ex.get("raw_context", [])
     sf_list = ex.get("supporting_facts", [])
-    
-    # Chuyển đổi sf_list thành mapping {Tiêu_đề: {chỉ_số_câu}}
+
     sf_dict = {}
     for item in sf_list:
-        if isinstance(item, list) and len(item) == 2:
-            title, sent_idx = item
-            if title not in sf_dict:
-                sf_dict[title] = set()
-            sf_dict[title].add(sent_idx)
+        if len(item) == 2:
+            t, idx = item
+            if t not in sf_dict: sf_dict[t] = set()
+            sf_dict[t].add(idx)
 
     full_string = ""
     spans = []
-    
-    # Duyệt qua từng đoạn văn trong context
     for item in context_list:
         if isinstance(item, list) and len(item) == 2:
             title, sents = item
             for i, sent in enumerate(sents):
                 start_idx = len(full_string)
-                # Quan trọng: Nối câu bằng khoảng trắng để khớp tokenizer
+                # Dùng dấu cách để nối y hệt như hàm build_support_context của bạn
                 full_string += sent + " " 
                 end_idx = len(full_string)
-                
-                # Nếu câu này nằm trong danh sách SF
                 if title in sf_dict and i in sf_dict[title]:
                     spans.append((start_idx, end_idx))
-                    
     return full_string.strip(), spans
