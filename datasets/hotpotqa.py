@@ -133,7 +133,7 @@ class HotpotQADataset(Dataset):
             qa = {
                 "id": str(ex.get("_id", "")), # Sửa theo JSON mẫu của bạn
                 "question": ex["question"],
-                "context": ex["context"],
+                "context": flat_context,
                 "answer_text": str(ex.get("answer", "")),
                 "answer_start": ex["answer_start"]
             }
@@ -283,27 +283,51 @@ def _build_sf_char_spans(ex):
     return None
 
 def _build_flat_context_and_spans(ex):
-    # Sử dụng raw_context (dạng list) để tính vị trí chính xác
-    context_list = ex.get("raw_context", [])
+    # Lấy thông tin từ file JSONL đã được tiền xử lý
+    # Lưu ý: ex['context'] lúc này là chuỗi đã nối từ to_jsonl
+    # Chúng ta dùng raw_context (list) để tính lại vị trí chính xác
+    context_list = ex.get("raw_context", []) 
     sf_list = ex.get("supporting_facts", [])
-
-    sf_dict = {}
-    for item in sf_list:
-        if len(item) == 2:
-            t, idx = item
-            if t not in sf_dict: sf_dict[t] = set()
-            sf_dict[t].add(idx)
+    
+    sf_dict = {t: set(idx for title, idx in sf_list if title == t) for t, _ in context_list}
 
     full_string = ""
     spans = []
-    for item in context_list:
-        if isinstance(item, list) and len(item) == 2:
-            title, sents = item
-            for i, sent in enumerate(sents):
-                start_idx = len(full_string)
-                # Dùng dấu cách để nối y hệt như hàm build_support_context của bạn
-                full_string += sent + " " 
-                end_idx = len(full_string)
-                if title in sf_dict and i in sf_dict[title]:
-                    spans.append((start_idx, end_idx))
+    
+    # 1. Lọc ra các title xuất hiện trong SF để khớp với build_support_context
+    sf_titles = [t for t, _ in sf_list]
+    ordered_titles = []
+    seen = set()
+    for t in sf_titles:
+        if t not in seen:
+            ordered_titles.append(t); seen.add(t)
+    
+    # Nếu không có SF nào (hiếm), dùng toàn bộ context
+    if not ordered_titles:
+        ordered_titles = [t for t, _ in context_list]
+        
+    para_map = {title: sents for title, sents in context_list}
+
+    # 2. Xây dựng chuỗi y hệt như hàm build_support_context
+    for i, title in enumerate(ordered_titles):
+        sents = para_map.get(title, [])
+        if not sents: continue
+        
+        # Nếu không phải đoạn đầu, thêm \n\n như hàm tiền xử lý
+        if i > 0:
+            full_string += "\n\n"
+            
+        for j, sent in enumerate(sents):
+            start_idx = len(full_string)
+            full_string += sent
+            end_idx = len(full_string)
+            
+            # Đánh dấu span nếu câu này thuộc SF
+            if title in sf_dict and j in sf_dict[title]:
+                spans.append((start_idx, end_idx))
+            
+            # Thêm dấu cách giữa các câu (trừ câu cuối cùng của đoạn)
+            if j < len(sents) - 1:
+                full_string += " "
+                
     return full_string.strip(), spans
