@@ -290,12 +290,14 @@ def evaluate(
                 if fuse_bert_qa:
                     out = model(input_ids=input_ids, attention_mask=attention_mask,
                                 start_positions=start_positions, end_positions=end_positions,
-                                sf_mask=sf_mask_gold)
+                                #sf_mask=sf_mask_gold
+                                )
                 else:
                     # (Giữ logic cũ của bạn cho HRM đơn thuần ở đây...)
                     out = model(input_ids=input_ids, attention_mask=attention_mask,
                                 start_positions=start_positions, end_positions=end_positions,
-                                sf_mask=sf_mask_gold)
+                                #sf_mask=sf_mask_gold
+                                )
 
             if 'loss' in out:
                 losses.append(out['loss'].item())

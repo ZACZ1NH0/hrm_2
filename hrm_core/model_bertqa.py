@@ -61,7 +61,7 @@ class HRMBertForQA(nn.Module):
         sf_logits = self.sf_head(z_H_out).squeeze(-1)
 
         sf_prob = torch.sigmoid(sf_logits).unsqueeze(-1) # [B, S, 1]
-        z_H_focused = z_H_out * (1.0 + sf_prob)
+        z_H_focused = z_H_out * (1 + sf_prob)
 
         logits_h = self.hrm_qa(z_H_focused)  # [B,S,2]
 
