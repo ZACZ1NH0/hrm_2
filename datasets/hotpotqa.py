@@ -197,15 +197,29 @@ def _build_sf_char_spans(ex):
 def _build_flat_context_and_spans(ex):
     context_list = ex.get("context", [])
     sf_pairs = ex.get("supporting_facts", [])
-    sf_dict = {title: set(idx for t, idx in sf_pairs if t == title) for title, _ in context_list}
+    
+    # Sửa lỗi: Kiểm tra cấu trúc từng phần tử trong context_list
+    valid_context = []
+    for item in context_list:
+        if isinstance(item, list) and len(item) == 2:
+            valid_context.append(item)
+    
+    # Tạo mapping an toàn
+    sf_dict = {}
+    for title, sent_idx in sf_pairs:
+        if title not in sf_dict:
+            sf_dict[title] = set()
+        sf_dict[title].add(sent_idx)
 
     full_string = ""
     spans = []
-    for title, sents in context_list:
+    for title, sents in valid_context:
         for i, sent in enumerate(sents):
             start_idx = len(full_string)
-            full_string += sent + " " # Nối bằng dấu cách
+            # Nối câu và thêm khoảng trắng để khớp với Tokenizer
+            full_string += sent + " " 
             end_idx = len(full_string)
             if title in sf_dict and i in sf_dict[title]:
                 spans.append((start_idx, end_idx))
+                
     return full_string.strip(), spans
