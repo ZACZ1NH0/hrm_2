@@ -124,11 +124,8 @@ class HotpotQADataset(Dataset):
         self.doc_stride = doc_stride
         self.is_train = is_train
         self.features = []
-
-        # Load data (giả định file JSON chuẩn list)
-        with open(path, 'r', encoding='utf-8') as f:
-            raw = json.load(f)
-
+        
+        raw = list(load_jsonl(path))
         for ex in raw:
             # 1. Tạo context phẳng và lấy span chuẩn
             flat_context, sf_char_spans = _build_flat_context_and_spans(ex)
