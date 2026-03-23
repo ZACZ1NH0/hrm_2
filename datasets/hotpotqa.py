@@ -128,20 +128,18 @@ class HotpotQADataset(Dataset):
         raw = list(load_jsonl(path))
         for ex in raw:
             # 1. Tạo context phẳng và lấy span chuẩn
-            flat_context, sf_char_spans = _build_flat_context_and_spans(ex)
+            sf_char_spans = _build_sf_char_spans(ex)
             
             qa = {
                 "id": str(ex.get("_id", "")), # Sửa theo JSON mẫu của bạn
                 "question": ex["question"],
-                "context": flat_context,
-                "answer_text": str(ex.get("answer", "")),
-                "answer_start": ex["answer_start"]
+                "context": ex["context"],
+                "answer_text": str(ex.get("answer_text", "")),
+                "answer_start": ex.get("answer_start", -1)
             }
 
             # Tìm vị trí answer_start trong flat_context
             ans_text = qa["answer_text"]
-            qa["answer_start"] = flat_context.find(ans_text) if ans_text else -1
-
             enc = self.tokenizer(
                 qa["question"], qa["context"],
                 return_offsets_mapping=True,
@@ -331,3 +329,31 @@ def _build_flat_context_and_spans(ex):
                 full_string += " "
                 
     return full_string.strip(), spans
+
+def _build_sf_char_spans(ex):
+    # Lấy chuỗi context đã được nối sẵn từ file JSONL
+    full_context = ex.get("context", "")
+    # Lấy danh sách câu gốc để tìm vị trí
+    raw_context_list = ex.get("raw_context_list", [])
+    sf_pairs = ex.get("supporting_facts", [])
+    
+    # Tạo mapping {Tiêu đề: {chỉ số câu}}
+    sf_dict = {}
+    for item in sf_pairs:
+        if len(item) == 2:
+            title, sent_idx = item
+            if title not in sf_dict: sf_dict[title] = set()
+            sf_dict[title].add(sent_idx)
+
+    spans = []
+    for title, sents in raw_context_list:
+        if title not in sf_dict:
+            continue
+        for i, sent in enumerate(sents):
+            if i in sf_dict[title]:
+                # Tìm vị trí chính xác của câu này trong chuỗi context tổng thể
+                start_idx = full_context.find(sent)
+                if start_idx != -1:
+                    end_idx = start_idx + len(sent)
+                    spans.append((start_idx, end_idx))
+    return spans
