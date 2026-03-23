@@ -28,6 +28,7 @@ class HotpotQADataset(Dataset):
 
         raw = list(load_jsonl(path))
         for ex in raw:
+            flat_context, sf_char_spans = _build_flat_context_and_spans(ex)
             qa = {
                 "id": str(ex.get("id", "")),
                 "question": ex["question"],
@@ -35,9 +36,9 @@ class HotpotQADataset(Dataset):
                 "answer_text": ex.get("answer_text") or ex.get("answer"),
                 "answer_start": int(ex.get("answer_start")),
             }
-            sf_char_spans = ex.get("sf_char_spans")  # ví dụ: [[s1,e1], [s2,e2], ...] theo char trong context
-            if sf_char_spans is None:
-                sf_char_spans = _build_sf_char_spans(ex)
+            # sf_char_spans = ex.get("sf_char_spans")  # ví dụ: [[s1,e1], [s2,e2], ...] theo char trong context
+            # if sf_char_spans is None:
+            #     sf_char_spans = _build_sf_char_spans(ex)
             enc = self.tokenizer(
                 qa["question"], qa["context"],
                 return_offsets_mapping=True,
@@ -106,6 +107,10 @@ class HotpotQADataset(Dataset):
                     feat["start_positions"] = torch.tensor(start_pos, dtype=torch.long)
                     feat["end_positions"] = torch.tensor(end_pos, dtype=torch.long)
                 self.features.append(feat)
+        total_sf_tokens = sum(f["sf_mask"].sum().item() for f in self.features)
+        print(f"DEBUG: Total SF tokens in dataset: {total_sf_tokens}")
+        if total_sf_tokens == 0:
+            raise ValueError("DATA ERROR: sf_mask is all zeros! Check your _build_sf_char_spans logic.")
 
     def __len__(self):
         return len(self.features)
@@ -188,3 +193,19 @@ def _build_sf_char_spans(ex):
                 char_cursor = ed + 1  # +1 cho dấu ngắt
         return spans
     return None
+
+def _build_flat_context_and_spans(ex):
+    context_list = ex.get("context", [])
+    sf_pairs = ex.get("supporting_facts", [])
+    sf_dict = {title: set(idx for t, idx in sf_pairs if t == title) for title, _ in context_list}
+
+    full_string = ""
+    spans = []
+    for title, sents in context_list:
+        for i, sent in enumerate(sents):
+            start_idx = len(full_string)
+            full_string += sent + " " # Nối bằng dấu cách
+            end_idx = len(full_string)
+            if title in sf_dict and i in sf_dict[title]:
+                spans.append((start_idx, end_idx))
+    return full_string.strip(), spans
