@@ -370,6 +370,151 @@ def evaluate(
 
 # --------- Main ---------
 
+# def main():
+#     import csv
+#     import os
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument('--train_path', type=str, required=True, help='./hotpot_train_v1.1.json')
+#     parser.add_argument('--dev_path', type=str, required=True, help='./hotpot_dev_distractor_v1.json')
+#     parser.add_argument('--tokenizer', type=str, default='bert-base-uncased')
+#     parser.add_argument('--max_length', type=int, default=512)
+#     parser.add_argument('--batch_size', type=int, default=32)
+#     parser.add_argument('--epochs', type=int, default=5)
+#     parser.add_argument('--lr', type=float, default=0.005)
+#     parser.add_argument('--weight_decay', type=float, default=0.01)
+#     parser.add_argument('--grad_clip', type=float, default=1.0)
+#     parser.add_argument('--seed', type=int, default=42)
+#     parser.add_argument('--out_dir', type=str, default='checkpoints')
+#     parser.add_argument('--encoder_name', type=str, default='', help='HF encoder name, e.g., bert-base-uncased')
+#     parser.add_argument('--freeze_encoder', action='store_true')
+#     parser.add_argument('--fuse_bert_qa', action='store_true')
+#     parser.add_argument('--alpha', type=float, default=0.6)
+#     args = parser.parse_args()
+
+#     os.makedirs(args.out_dir, exist_ok=True)
+#     set_seed(args.seed)
+#     #log
+#     log_path = os.path.join(args.out_dir, "train_log.csv")
+#     with open(log_path, "w", newline="", encoding="utf-8") as f:
+#         writer = csv.writer(f)
+#         writer.writerow(["epoch", "train_loss", "dev_loss", "dev_F1", "dev_EM"])
+
+#     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer or args.encoder_name or 'bert-base-uncased', use_fast=True)
+    
+#     encoder = None
+    
+#     if args.encoder_name:
+#         encoder = AutoModel.from_pretrained(args.encoder_name).to(device)
+#         if args.freeze_encoder:
+#             for p in encoder.parameters():
+#                 p.requires_grad = False
+#     # Data
+#     train_ds = HotpotQADataset(args.train_path, tokenizer, max_length=args.max_length, doc_stride=160, is_train=True)
+#     dev_ds = HotpotQADataset(args.dev_path, tokenizer, max_length=args.max_length, doc_stride=160, is_train=True)
+
+#     train_ld = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=2, collate_fn=collate_train)
+#     dev_ld = DataLoader(dev_ds, batch_size=args.batch_size, shuffle=False, num_workers=2, collate_fn=collate_eval)
+#     if args.encoder_name and args.fuse_bert_qa:
+#         # Dùng BERT encoder + blend QA head
+#         enc_name = args.encoder_name
+#         cfg = HRMCoreConfig(vocab_size=0, max_position_embeddings=args.max_length,
+#                         hidden_size=768, num_heads=12, ff_mult=4, H_layers=2, L_layers=2,
+#                         H_cycles=3, L_cycles=1)
+#         model = HRMBertForQA(cfg, encoder_name=enc_name, alpha=args.alpha, freeze_encoder=args.freeze_encoder).to(device)
+#     else:
+#         # Giữ đường cũ HRMForQA (embedding riêng)
+#         cfg = HRMCoreConfig(vocab_size=tokenizer.vocab_size, max_position_embeddings=args.max_length,
+#                         hidden_size=768, num_heads=12, ff_mult=4, H_layers=2, L_layers=2,
+#                         H_cycles=3, L_cycles=1)
+#         model = HRMForQA(cfg).to(device)
+#     # Model
+    
+
+#     # Optimizer (standard AdamW)
+#     opt = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
+#     best_f1 = -1.0
+#     global_step = 0
+#     for epoch in range(1, args.epochs + 1):
+#         model.train()
+#         pbar = tqdm(DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=2, collate_fn=collate_train),
+#                     desc=f"train epoch {epoch}")
+#         scaler = torch.cuda.amp.GradScaler()
+#         total_loss = 0.0
+#         step_count = 0
+        
+#         for batch in pbar:
+#             input_ids = batch['input_ids'].to(device)
+#             attention_mask = batch['attention_mask'].to(device)
+#             start_positions = batch['start_positions'].to(device)
+#             end_positions = batch['end_positions'].to(device)
+
+#             # sf_mask = batch['sf_mask'].to(device) # 20/3/2026
+#             sf_mask = batch.get('sf_mask')
+#             if sf_mask is not None:
+#                 sf_mask = sf_mask.to(device)
+                
+#             if args.fuse_bert_qa:
+#                 out = model(
+#                     input_ids=input_ids,
+#                     attention_mask=attention_mask,
+#                     start_positions=start_positions,
+#                     end_positions=end_positions,
+#                     sf_mask=sf_mask
+#                     )
+#             else:
+#                 if encoder is not None:
+#                     with torch.no_grad() if args.freeze_encoder else torch.enable_grad():
+#                         enc_out = encoder(input_ids=input_ids, attention_mask=attention_mask, return_dict=True).last_hidden_state
+#                     out = model(attention_mask=attention_mask,
+#                         inputs_embeds=enc_out,
+#                         start_positions=start_positions,
+#                         end_positions=end_positions)
+#                 else:
+#                     out = model(input_ids=input_ids,
+#                         attention_mask=attention_mask,
+#                         start_positions=start_positions,
+#                         end_positions=end_positions)
+            
+#             loss = out['loss']
+#             total_loss += loss.item()
+#             step_count += 1
+
+#             opt.zero_grad()
+#             scaler.scale(loss).backward()
+#             if args.grad_clip is not None and args.grad_clip > 0:
+#                 scaler.unscale_(opt)
+#                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+#             # opt.step()
+#             scaler.step(opt)
+#             scaler.update()
+
+#             global_step += 1
+#             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+        
+#         avg_train_loss = total_loss / step_count
+#         # Eval
+#         metrics = evaluate(
+#             model, tokenizer, dev_ld, device,
+#             encoder=None,              
+#             amp=True,
+#             max_answer_len=50,
+#             fuse_bert_qa= args.fuse_bert_qa,
+#             boost_sf=0.8               
+#             )
+#         print(f"Epoch {epoch}: dev loss={metrics['loss']:.4f} EM={metrics['EM']*100:.2f} F1={metrics['F1']*100:.2f} Supporting fact f1 = {metrics['SF_F1']*100:.2f} JointF1 = {metrics['Joint_F1']*100:.2f}"  )
+#         # Save log
+#         with open(log_path, "a", newline="", encoding="utf-8") as f:
+#             writer = csv.writer(f)
+#             writer.writerow([epoch, avg_train_loss, metrics['loss'], metrics['F1'], metrics['EM']])
+#         # Save best
+#         if metrics['F1'] > best_f1:
+#             best_f1 = metrics['F1']
+#             path = os.path.join(args.out_dir, 'best.pt')
+#             torch.save({'model_state_dict': model.state_dict(), 'cfg': cfg.__dict__, 'tokenizer': args.tokenizer}, path)
+#             print(f"Saved new best to {path}")
+
 def main():
     import csv
     import os
@@ -393,11 +538,14 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
     set_seed(args.seed)
+    
     #log
     log_path = os.path.join(args.out_dir, "train_log.csv")
-    with open(log_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["epoch", "train_loss", "dev_loss", "dev_F1", "dev_EM"])
+    # Thay vì "w", dùng "a" để không ghi đè log cũ nếu đang chạy tiếp
+    if not os.path.exists(log_path):
+        with open(log_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["epoch", "train_loss", "dev_loss", "dev_F1", "dev_EM"])
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer or args.encoder_name or 'bert-base-uncased', use_fast=True)
@@ -409,12 +557,14 @@ def main():
         if args.freeze_encoder:
             for p in encoder.parameters():
                 p.requires_grad = False
+                
     # Data
     train_ds = HotpotQADataset(args.train_path, tokenizer, max_length=args.max_length, doc_stride=160, is_train=True)
     dev_ds = HotpotQADataset(args.dev_path, tokenizer, max_length=args.max_length, doc_stride=160, is_train=True)
 
     train_ld = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=2, collate_fn=collate_train)
     dev_ld = DataLoader(dev_ds, batch_size=args.batch_size, shuffle=False, num_workers=2, collate_fn=collate_eval)
+    
     if args.encoder_name and args.fuse_bert_qa:
         # Dùng BERT encoder + blend QA head
         enc_name = args.encoder_name
@@ -428,19 +578,49 @@ def main():
                         hidden_size=768, num_heads=12, ff_mult=4, H_layers=2, L_layers=2,
                         H_cycles=3, L_cycles=1)
         model = HRMForQA(cfg).to(device)
-    # Model
-    
 
-    # Optimizer (standard AdamW)
+    # Optimizer & Scaler
     opt = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    scaler = torch.cuda.amp.GradScaler()
 
+    # ========================================================================
+    # LOGIC LOAD CHECKPOINT (Chữa cháy + Auto-Resume)
+    # ========================================================================
+    start_epoch = 1
     best_f1 = -1.0
     global_step = 0
-    for epoch in range(1, args.epochs + 1):
+
+    latest_path = os.path.join(args.out_dir, 'latest.pt')
+    rescue_path = '/kaggle/input/models/zaczinho/hrmepoch2/pytorch/default/1/best.pt' # Sửa tên folder input nếu bạn đặt tên khác
+    
+    resume_path = latest_path if os.path.exists(latest_path) else (rescue_path if os.path.exists(rescue_path) else None)
+
+    if resume_path:
+        print(f"\n=> Loading checkpoint from {resume_path} ...")
+        checkpoint = torch.load(resume_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Nếu là file Auto-Resume (có đủ bộ nhớ)
+        if 'epoch' in checkpoint and 'optimizer_state_dict' in checkpoint:
+            opt.load_state_dict(checkpoint['optimizer_state_dict'])
+            scaler.load_state_dict(checkpoint['scaler_state_dict'])
+            start_epoch = checkpoint['epoch'] + 1
+            best_f1 = checkpoint.get('best_f1', -1.0)
+            print(f"=> Auto-Resume activated! Continuing from Epoch {start_epoch} (Best F1: {best_f1:.2f})")
+            
+        # Nếu là file Chữa cháy của hôm nay (chỉ có weights)
+        else:
+            start_epoch = 3 
+            best_f1 = 66.63 # Kỷ lục Epoch 2 của bạn
+            print(f"=> Rescue mode! Weights loaded. Forcing start from Epoch {start_epoch}.")
+    else:
+        print("\n=> No checkpoint found. Starting from scratch.")
+    # ========================================================================
+
+    # Vòng lặp Train
+    for epoch in range(start_epoch, args.epochs + 1):
         model.train()
-        pbar = tqdm(DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=2, collate_fn=collate_train),
-                    desc=f"train epoch {epoch}")
-        scaler = torch.cuda.amp.GradScaler()
+        pbar = tqdm(train_ld, desc=f"train epoch {epoch}")
         total_loss = 0.0
         step_count = 0
         
@@ -450,7 +630,6 @@ def main():
             start_positions = batch['start_positions'].to(device)
             end_positions = batch['end_positions'].to(device)
 
-            # sf_mask = batch['sf_mask'].to(device) # 20/3/2026
             sf_mask = batch.get('sf_mask')
             if sf_mask is not None:
                 sf_mask = sf_mask.to(device)
@@ -486,7 +665,7 @@ def main():
             if args.grad_clip is not None and args.grad_clip > 0:
                 scaler.unscale_(opt)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-            # opt.step()
+            
             scaler.step(opt)
             scaler.update()
 
@@ -494,6 +673,7 @@ def main():
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
         
         avg_train_loss = total_loss / step_count
+        
         # Eval
         metrics = evaluate(
             model, tokenizer, dev_ld, device,
@@ -503,17 +683,41 @@ def main():
             fuse_bert_qa= args.fuse_bert_qa,
             boost_sf=0.8               
             )
+        
         print(f"Epoch {epoch}: dev loss={metrics['loss']:.4f} EM={metrics['EM']*100:.2f} F1={metrics['F1']*100:.2f} Supporting fact f1 = {metrics['SF_F1']*100:.2f} JointF1 = {metrics['Joint_F1']*100:.2f}"  )
+        
         # Save log
         with open(log_path, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow([epoch, avg_train_loss, metrics['loss'], metrics['F1'], metrics['EM']])
-        # Save best
+            
+        # ========================================================================
+        # LOGIC SAVE CHECKPOINT TRỌN GÓI
+        # ========================================================================
+        checkpoint_data = {
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': opt.state_dict(),
+            'scaler_state_dict': scaler.state_dict(),
+            'best_f1': best_f1,
+            'cfg': cfg.__dict__,
+            'tokenizer': args.tokenizer
+        }
+
+        # LUÔN lưu trạng thái mới nhất để tự động resume
+        latest_save_path = os.path.join(args.out_dir, 'latest.pt')
+        torch.save(checkpoint_data, latest_save_path)
+        print(f"Saved latest state to {latest_save_path}")
+
+        # CHỈ lưu best.pt khi có kỷ lục mới
         if metrics['F1'] > best_f1:
             best_f1 = metrics['F1']
-            path = os.path.join(args.out_dir, 'best.pt')
-            torch.save({'model_state_dict': model.state_dict(), 'cfg': cfg.__dict__, 'tokenizer': args.tokenizer}, path)
-            print(f"Saved new best to {path}")
+            best_save_path = os.path.join(args.out_dir, 'best.pt')
+            # Cập nhật lại best_f1 trong dictionary trước khi lưu best
+            checkpoint_data['best_f1'] = best_f1
+            torch.save(checkpoint_data, best_save_path)
+            print(f"*** New best F1 score! Saved to {best_save_path} ***")
+        # ========================================================================
 
 
 if __name__ == '__main__':
