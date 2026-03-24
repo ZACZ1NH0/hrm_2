@@ -352,6 +352,7 @@ def evaluate(
 
     # 3. Tính Metrics cuối cùng
     all_samples = list(id2best.values())
+    print(f"\n--- DEBUG EVAL: Tính điểm trên tổng cộng {len(all_samples)} câu hỏi ---")
     ems = [exact_match_score(v['pred'], v['gold']) for v in all_samples]
     f1s = [f1_score(v['pred'], v['gold']) for v in all_samples]
     sf_f1s = [v['sf_f1'] for v in all_samples]

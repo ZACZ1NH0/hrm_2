@@ -131,7 +131,7 @@ class HotpotQADataset(Dataset):
             sf_char_spans = _build_sf_char_spans(ex)
             
             qa = {
-                "id": str(ex.get("_id", "")), # Sửa theo JSON mẫu của bạn
+                "id": str(ex.get("_id", str(i))), # Sửa theo JSON mẫu của bạn
                 "question": ex["question"],
                 "context": ex["context"],
                 "answer_text": str(ex.get("answer_text", "")),
