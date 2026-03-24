@@ -126,7 +126,7 @@ class HotpotQADataset(Dataset):
         self.features = []
         
         raw = list(load_jsonl(path))
-        for ex in raw:
+        for i, ex in enumerate(raw):
             # 1. Tạo context phẳng và lấy span chuẩn
             sf_char_spans = _build_sf_char_spans(ex)
             
